@@ -3,7 +3,7 @@ from contextlib import suppress
 from argparse import ArgumentParser
 
 from bot.core.registrator import register_sessions
-from bot.utils.launcher import get_session_names, get_proxies, start_text, run_tasks
+from bot.utils.launcher import get_session_names, start_text, run_tasks
 from bot.utils.logger import logger
 
 
@@ -11,7 +11,7 @@ async def main() -> None:
     parser = ArgumentParser()
     parser.add_argument("-a", "--action", type=int, help="Action to perform")
     print(start_text)
-    logger.info(f"Detected {len(get_session_names())} sessions | {len(get_proxies())} proxies")
+    logger.info(f"Detected {len(get_session_names())} sessions")
 
     action = parser.parse_args().action
 

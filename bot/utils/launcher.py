@@ -1,8 +1,10 @@
 import os
 import glob
 import asyncio
+import json
 
 from itertools import cycle
+from typing import Tuple, List
 
 from pyrogram import Client
 from better_proxy import Proxy
@@ -31,22 +33,11 @@ def get_session_names() -> list[str]:
     return session_names
 
 
-def get_proxies() -> list[Proxy]:
-    proxies = []
-    if settings.USE_PROXY_FROM_FILE:
-        with open(file="bot/config/proxies.txt", encoding="utf-8-sig") as file:
-            for line in file:
-                if "type://" in line:
-                    continue
-                try:
-                    proxies.append(Proxy.from_str(proxy=line.strip()))
-                except ValueError as e:
-                    print(f"{e} - {line}")
-    return proxies
 
 
-def get_tg_clients() -> list[Client]:
 
+def get_tg_clients() -> dict[str, dict]:
+    result: dict[str, dict] = {}
     session_names = get_session_names()
 
     if not session_names:
@@ -55,23 +46,37 @@ def get_tg_clients() -> list[Client]:
     if not settings.API_ID or not settings.API_HASH:
         raise ValueError("API_ID and API_HASH not found in the .env file.")
 
-    tg_clients = [
-        Client(
+    file_path: str = 'sessions/accounts.json'
+    with open(file_path, 'r') as f:
+        accounts = json.load(f)
+
+    for account in accounts:
+        proxy = account.get('proxy', '')
+        session_name = account.get('session_name', '')
+        # 去除 ":@" 并转换为 socks5:// 格式
+        if proxy.startswith(':@'):
+            proxy = 'socks5://' + proxy[2:]
+            proxy = Proxy.from_str(proxy)
+
+        # 创建 Client 对象
+        client = Client(
             name=session_name,
             api_id=settings.API_ID,
             api_hash=settings.API_HASH,
             workdir="sessions/",
             plugins=dict(root="bot/plugins"),
         )
-        for session_name in session_names
-    ]
 
-    return tg_clients
+        # 将 session_name、proxy 和 client 组合起来
+        result[session_name] = {
+            'proxy': proxy,
+            'client': client
+        }
+        logger.info(f"load session:{session_name} proxy:{proxy} tg_client:{client}")
+    return result
 
 async def run_tasks():
-    tg_clients = get_tg_clients()
-    proxies = get_proxies()
-    proxies_cycle = cycle(proxies) if proxies else None
+    result = get_tg_clients()
     loop = asyncio.get_event_loop()
 
     if settings.USE_CUSTOM_PAYLOAD_SERVER and not await check_payload_server(settings.CUSTOM_PAYLOAD_SERVER_URL, full_test=True):
@@ -84,11 +89,11 @@ async def run_tasks():
     tasks = [
         loop.create_task(
             run_tapper(
-                tg_client=tg_client,
-                proxy=next(proxies_cycle) if proxies_cycle else None
+                tg_client=config['client'],
+                proxy=config['proxy']
             )
         )
-        for tg_client in tg_clients
+        for config in  result.values()
     ]
 
     await asyncio.gather(*tasks)

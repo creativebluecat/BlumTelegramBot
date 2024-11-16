@@ -160,8 +160,10 @@ class Tapper:
             return
 
         tries = 3
-
+        play_count = 0
         while self.play_passes:
+            if play_count > 5:
+                return self._log.info(f'max play times, gonna skip games')
             if tries <= 0:
                 return self._log.warning('No more trying, gonna skip games')
             if not await check_payload_server(settings.CUSTOM_PAYLOAD_SERVER_URL):
@@ -211,6 +213,7 @@ class Tapper:
             await self.update_user_balance()
             await self.update_points_balance()
             if status:
+                play_count = play_count + 1
                 self._log.success(f"Finish play in game! Reward: <g>{blum_amount}</g>. "
                                   f"Balance: <y>{self._balance}</y>, <r>{self.play_passes}</r> play passes.")
 
