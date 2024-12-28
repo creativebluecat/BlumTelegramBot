@@ -3,12 +3,15 @@ import traceback
 from random import randint, uniform
 from time import time
 
+import aiocfscrape
+import aiohttp
 from better_proxy import Proxy
 from aiocfscrape import CloudflareScraper
 from aiohttp_socks import ProxyConnector
 from pyrogram import Client
 
 from bot.config import settings
+from bot.core.TLS import TLSv1_3_BYPASS
 from bot.core.agents import check_user_agent
 from bot.core.api import BlumApi
 from bot.core.headers import headers as default_headers
@@ -33,7 +36,7 @@ class Tapper:
         self.tg_client = tg_client
         self._log = log
 
-    async def auth(self, session: CloudflareScraper):
+    async def auth(self, session: aiohttp.ClientSession):
         self._api = BlumApi(session, self._log)
         web_data_params = await get_tg_web_data(self.tg_client, self._log)
         self._log.trace("Got init data for auth.")
@@ -122,12 +125,12 @@ class Tapper:
             if not task.get('status'):
                 continue
             if task.get('status') == "NOT_STARTED":
-                self._log.info(f"Started doing task - '{task['title']}'")
+                self._log.info(f"Started doing task - <cyan>'{task['title']}'</cyan>")
                 is_task_started = await self._api.start_task(task_id=task["id"])
             elif task['status'] == "READY_FOR_CLAIM":
                 status = await self._api.claim_task(task_id=task["id"])
                 if status:
-                    self._log.success(f"Claimed task - '{task['title']}'")
+                    self._log.success(f"Claimed task - <cyan>'{task['title']}'</cyan>")
             elif task['status'] == "READY_FOR_VERIFY" and task['validationType'] == 'KEYWORD':
                 await asyncio.sleep(uniform(1, 3))
                 keyword = [item["answer"] for item in tasks_codes if item['id'] == task["id"]]
@@ -136,10 +139,10 @@ class Tapper:
                 status = await self._api.validate_task(task["id"], keyword.pop())
                 if not status:
                     continue
-                self._log.success(f"Validated task - '{task['title']}'")
+                self._log.success(f"Validated task - <cyan>'{task['title']}'</cyan>")
                 status = await self._api.claim_task(task["id"])
                 if status:
-                    self._log.success(f"Claimed task - '{task['title']}'")
+                    self._log.success(f"Claimed task - <cyan>'{task['title']}'</cyan>")
         await asyncio.sleep(uniform(0.5, 1))
         await self.update_user_balance()
         await self.update_points_balance()
@@ -197,7 +200,7 @@ class Tapper:
 
             await asyncio.sleep(sleep_time)
             freezes = int((sleep_time - 30) / 3)
-            clover = randint(settings.POINTS[0], settings.POINTS[1]) # blum points
+            clover = ((randint(settings.POINTS[0], settings.POINTS[1])) // 5) * 5 # blum points
 
             blum_amount = clover
             earned_points = {"BP": {"amount": blum_amount}}
@@ -226,8 +229,8 @@ class Tapper:
         await asyncio.sleep(random_delay)
 
     async def check_daily_reward(self):
-        daily_reward = await self._api.daily_reward_is_available()
-        if daily_reward:
+        daily_reward, status = await self._api.daily_reward_is_available()
+        if status is True:
             self._log.info(f"Available {daily_reward} daily reward.")
             status = await self._api.claim_daily_reward()
             if status:
@@ -289,14 +292,16 @@ class Tapper:
         await asyncio.sleep(uniform(0.1, 0.5))
         await self.update_user_balance()
 
-    async def run(self, proxy: Proxy | None) -> None:
+    async def run(self, proxy: str | None) -> None:
         if not settings.DEBUG:
             await self.random_delay()
 
-        proxy_conn = ProxyConnector().from_url(proxy.as_url) if proxy else None
+        ssl_context = TLSv1_3_BYPASS.create_ssl_context()
+        proxy_conn = ProxyConnector().from_url(url=str(proxy), ssl=ssl_context) if proxy \
+            else aiohttp.TCPConnector(ssl=ssl_context)
         headers = default_headers.copy()
         headers.update({'User-Agent': check_user_agent(self.tg_client.name)})
-        async with CloudflareScraper(headers=headers, connector=proxy_conn) as session:
+        async with aiohttp.ClientSession(headers=headers, connector=proxy_conn) as session:
             if proxy:
                 ip = await check_proxy(session)
                 if not ip:
